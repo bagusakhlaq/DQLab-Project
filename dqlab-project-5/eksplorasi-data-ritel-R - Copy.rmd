@@ -39,7 +39,7 @@ Instruksi:
 
 ```{r}
 #Load data dan simpan ke dalam variable bernama ‘data’
-data <- read.csv("https://storage.googleapis.com/dqlab-dataset/transaksi_stok_dan_penjualan.tsv", header = TRUE, sep = "\t")
+data <- read.csv("transaksi_stok_dan_penjualan.tsv", header = TRUE, sep = "\t")
 
 #Tampilkan 5 data teratas 
 head(data, 5)
