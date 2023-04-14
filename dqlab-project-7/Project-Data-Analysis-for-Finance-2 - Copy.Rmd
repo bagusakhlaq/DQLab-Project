@@ -1,0 +1,559 @@
+---
+title: 'DQLab'
+subtitle: 'Project Data Analysis for Finance: Proses Investasi Investor'
+author: "Bagus Akhlaq"
+date: "2023-04-08"
+output: 
+  html_document:
+    toc: true
+    number_section: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Chapter 1: Introduction
+
+## Latar Belakang
+
+DQLab Finance merupakan perusahaan peer to peer lending, sehingga DQLab Finance membutuhkan investor untuk memberikan pinjaman kepada calon borrower.
+
+Setiap ada borrower yang mengajukan pinjaman, DQLab Finance akan mengupload loan itu ke marketplace lalu kemudian investor yang sudah mendaftar akan melihat loan tersebut, jika ada yang cocok maka mereka akan order lalu bayar. Sehingga investor tersebut membiayai loan yang tadi dipilih.
+
+Pada project kali ini, akan dilakukan analisis terhadap proses investasi dari investor tersebut.
+
+## Tugas dan Langkah
+
+Sebagai seorang data analyst, kamu diminta untuk menganalisis proses investasi dari investor yang terdaftar di DQLab Finance.
+
+Pada tugas kali ini, kamu akan menganalisis bagaimana behaviournya
+
+Langkah yang akan dilakukan adalah, 1. Eksplorasi data 2. Manipulasi data 3. Analisis proses investasi 4. Analisis waktu sampai investasi pertama 5. Analisis retention invest
+
+# Chapter 2: Package dan Data yang Digunakan
+
+## Package yang Digunakan
+
+Pada analisis kali ini, akan digunakan beberapa package yang membantu kita dalam melakukan analisis data,
+
+1.  Package **dplyr**, merupakan package yang paling sering digunakan dalam analisis data, sangat membantu dalam manipulasi data.
+
+2.  Package **ggplot2**, merupakan package yang digunakan untuk membuat plot dengan syntax yang konsisten.
+
+3.  Packages **scales**, digunakan untuk memformat value data numerik menjadi format yang mudah dibaca, tidak terlalu sering digunakan, tapi membantu ketika eksplorasi data.
+
+4.  Packages **tidyr**, digunakan untuk memformat bentuk data, dari wide menjadi long. sangat berguna dalam tahap preparasi data.
+
+5.  Packages lubridate, digunakan untuk mengolah tipe data Date maupun Timestamp.
+
+## Data yang Digunakan
+
+Untuk Dataset yang digunakan disediakan dalam format csv sehingga bisa dibaca di R
+
+```{r warning=FALSE, message=FALSE}
+df_event <- read.csv('event.csv', stringsAsFactors = F)
+dplyr::glimpse(df_event)
+```
+
+Terlihat bahwa ada 33,571 baris data (Observations) dan ada 4 kolom (Variables), yakni :
+
+1.  **loan_id** : unik ID dari loan yang diupload ke marketplace
+2.  **investor_id** : unik ID dari investor yang terdaftar
+3.  **nama_event** : kegiatan yang dilakukan oleh investor dan perubahan status loan
+4.  **created_at** : waktu (sampai detik) event terjadi
+
+## Mengubah kolom created_at menjadi tipe Timestamp
+
+Terlihat bawah created_at berisi timestamp, tetapi tipe datanya adalah **chr (character)**. untuk memudahkan, ubah dulu tipe data tersebut menjadi tipe timestamp agar nanti bisa diolah dengan lebih baik.
+
+Gunakan fungsi **ymd_hms** dari package **lubridate** untuk mengubah character berformat *Year-Month-Date* *Hour-Minute-Second* menjadi tipe timestamp.
+
+```{r warning=FALSE, message=FALSE}
+library(lubridate)
+df_event$created_at <- ymd_hms(df_event$created_at)
+dplyr::glimpse(df_event)
+```
+
+# Chapter 3: Data per Event
+
+## Summary Event
+
+Karena data yang ada berbentuk log per event, maka kita perlu melihat apa saja isi dari event ini, dan bagaimana flow nya.
+
+Dari data.frame **df_event** yang sudah dibuat pada bagian sebelumnya, dikelompokkan dengan *group by* berdasarkan *nama_event* lalu hitung dengan *summarise*,
+
+-   jumlah_event : untuk mengetahui jumlah terjadinya event, atau ada berapa baris
+
+-   loan : untuk mengetahui jumlah unik *loan_id*
+
+-   investor : untuk mengetahui jumlah unik *investor_id*
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+df_event %>% 
+  group_by(nama_event) %>%
+				summarise(jumlah_event = n(),
+						 	loan = n_distinct(loan_id),
+					 		investor = n_distinct(investor_id))
+```
+
+## Penjelasan Summary Event
+
+Berdasarkan hasil tersebut, ternyata ada 5 event. Dengan penjelasan sebagai berikut :
+
+-   investor_register : Event saat Investor register. Jumlah event sama dengan unik investor, artinya setiap investor melakukan event ini hanya 1 kali. Jumlah loan hanya 1, ini isinya NA, karena register ini tidak memerlukan loan.
+
+-   loan_to_marketplace : Event saat loan diupload ke marketplace. Jumlah event sama dengan jumlah loan, artinya setiap loan diupload hanya 1 kali. Jumlah investor hanya 1, ini isi NA, karena saat upload ke marketplace tidak berhubungan dengan investor.
+
+-   investor_view_loan : Event saat investor melihat detail loan di marketplace. Jumlah event nya tidak sama dengan unik loan maupun unik investor, artinya 1 investor dapat melihat loan yang sama beebrapa kali, dan 1 loan bisa dilihat oleh beberapa investor berbeda.
+
+-   investor_order_loan : Event saat investor memesan loan, menunggu pembayaran. Jumlah event nya tidak sama dengan unik loan maupun unik investor, artinya 1 loan bisa dipesan oleh beberapa investor berbeda (jika pemesanan sebelumnya tidak dibayar).
+
+-   investor_pay_loan : Event saat investor membayar loan dari pesanan sebelumnya. <br> Jumlah Event nya sama dengan unik loan, artinya 1 loan ini hanya bisa dibayar oleh 1 investor. Jumlah investor lebih sedikit daripada jumlah loan artinya 1 investor bisa membeli banyak loan.
+
+
+# Chapter 4: Mengubah format data proses investasi loan agar nama event menjadi nama kolom
+
+## Event loan di-upload ke marketplace
+Untuk event loan di-upload ke marketplace karena tidak ada investor_id nya, maka bisa diproses sendiri. Untuk memisahkannya, cukup filter nama event ‘loan_to_marketplace’, lalu ubah nama created_at sebagai marketplace.
+
+Dari data.frame **df_event**, filter nama event loan_to_marketplace pilih kolom apa saja yang mau diambil, yakni loan_id dan marketplace (ubah nama dari created_at, lakukan saat select). lalu simpan hasilnya sebagai data.frame baru **df_marketplace**.
+
+Terakhir tampilkan **df_marketplace**.
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+df_marketplace <- df_event %>%
+					filter(nama_event == 'loan_to_marketplace') %>%
+					select(loan_id, marketplace = created_at)
+
+df_marketplace
+```
+
+## Event investor melihat detail loan
+Untuk event investor melihat detail loan, karena investor bisa melihat detail loan berkali kali maka akan diproses terpisah untuk membuat summary per loan per investor
+
+Dari data.frame **df_event**, filter nama event *investor_view_loan* kelompokkan per **loan_id** dan **investor_id**, hitung dengan **summarise**,
+- **jumlah_view** : untuh tahu 1 investor view berapa kali loan tersebut,
+- **pertama_view** : untuk tahu kapan investor pertama kali melihat detail dari loan tersebut,
+- **terakhir_view** : untuk tahu kapan investor pertama kali melihat detail dari loan tersebut, nilainya bisa sama dengan pertama_view jika Lalu simpan hasilnya sebagai data.frame baru df_view_loan .
+
+Terakhir tampilkan **df_view_loan**.
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+df_view_loan <- df_event %>%
+				filter(nama_event == 'investor_view_loan') %>%
+				group_by(loan_id, investor_id) %>%
+				summarise(jumlah_view = n(),
+						  pertama_view = min(created_at),
+						  terakhir_view = max(created_at))
+
+df_view_loan
+```
+
+## Event investor pesan dan bayar loan
+Lalu untuk event investor_order_loan dan investor_pay_loan, karena unik untuk kombinasi loan_id dan investor_id, maka bisa diproses bersamaan, dan akan di-**spread** menggunakan package **tidyr**
+
+Dari data.frame **df_event**, filter nama event *investor_order_loan* dan *investor_pay_loan*, Spread kolom *nama_event* dan *created_at* agar *nama_event* menjadi nama kolom. Untuk memudahkan ubah nama event tersebut sembari select kolom, agar urutan dan namanya sebagai berikut
+- **loan_id**,
+- **investor_id**,
+- **order** : investor_order_loan,
+- **pay** : investor_pay_loan
+
+Lalu simpan hasilnya sebagai data.frame baru **df_order_pay**.
+
+Terakhir tampilkan **df_order_pay**.
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(tidyr)
+
+df_order_pay <- df_event %>%
+				filter(nama_event %in% c('investor_order_loan', 'investor_pay_loan')) %>%
+				spread(nama_event, created_at) %>%
+				select(loan_id,
+					  investor_id,
+					  order = investor_order_loan,
+					  pay = investor_pay_loan)
+
+df_order_pay
+```
+
+## Gabungan Data Loan Investasi
+Selanjutnya, gabungkan **df_marketplace** dengan **df_view_loan** dan **df_order_pay** yang sudah dibuat sebelumnya untuk membuat data.frame yang berisi waktu untuk masing-masing event dari loan diupload ke marketplace, dilihat oleh investor, lalu dipesan dan dibayar.
+
+Gunakan fungsi **left join** karena tidak semua loan dan investor ada di setiap data.frame **df_marketplace** join dengan **df_view_loan** menggunakan loan_id, lalu join dengan **df_order_pay** menggunakan loan_id dan investor_id lalu simpan sebagai **df_loan_invest**.
+
+Terakhir tampilkan **df_loan_invest**.
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+
+df_loan_invest <- df_marketplace %>%
+					left_join(df_view_loan, by= 'loan_id') %>%
+					left_join(df_order_pay, by= c('loan_id', 'investor_id'))
+
+df_loan_invest
+```
+
+# Chapter 5: Analisis Proses Investasi
+
+## Melihat hubungan jumlah view dengan order
+Pada tahap ini, akan dilihat apakah ada hubungan antara berapa kali investor melihat loan dengan keputusan order atau tidak.
+
+Dengan menggunakan data.frame **df_loan_invest**, buat status_order dengan isi ‘not_order’ jika tidak order (order kosong) dan ‘order’ untuk lainnya.
+Hitung kombinasi **jumlah_view** dan **status_order** yang baru dibuat dengan fungsi **count** lalu spread **status_order** sebagai key dengan value **n** yang merupakan hasil dari count, set **fill = 0** agar ketika ada yang kosong diganti dengan 0.
+Terakhir hitung **persen_order** yang merupakan nilai **order** dibagi **total dari order dan not_order**, format dengan **percent** agar hasil lebih mudah dibaca
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(tidyr)
+df_loan_invest %>%
+  mutate(status_order = ifelse(is.na(order), 'not_order','order')) %>% 
+  count(jumlah_view, status_order) %>% 
+  spread(status_order, n, fill = 0) %>% 
+  mutate(persen_order = scales::percent(order/(order + not_order)))
+```
+
+Dan ternyata tidak ada pola khusus yang menyatakan hubungan banyaknya view dengan keputusan investor memesan loan tersebut. Hampir merata bahwa lebih dari 85% investor yangs sudah melihat loan akan memesannya.
+
+Untuk Jumlah View 4 atau lebih, karena sangat sedikit event nya maka bisa diabaikan.
+
+## Berapa lama waktu yang dibutuhkan investor untuk pesan sejak pertama melihat detail loan
+Pada tahap ini, akan dilihat persebaran lama waktu dari pertama melihat detail loan sampai memutuskan untuk order
+
+dengan menggunakan data.frame **df_loan_invest**, filter hanya yang order (tidak kosong) lalu hitung **lama_order_view**,
+
+**difftime** ini merupakan fungsi bawaan (package base) yang digunakan untuk menghitung selisih antara 2 waktu, disini digunakan units “mins” yang berarti output ditampilkan dalam satuan menit.
+
+Lalu kelompokkan berdasarkan jumlah_view untuk menghitung summary (jumlah transaksi, min, median, mean dan max) dari kolom **lama_order_view**. Format hasilnya dengan pembulatan 2 digit dibelakang koma agar angkanya seragam, mudah dilihat.
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(tidyr)
+df_loan_invest %>%
+  filter(!is.na(order)) %>% 
+  mutate(lama_order_view = as.numeric(difftime(order, pertama_view, units = "mins"))) %>% 
+  group_by(jumlah_view) %>% 
+  summarise_at(vars(lama_order_view), funs(total = n(), min, median, mean, max)) %>% 
+  mutate_if(is.numeric, funs(round(.,2)))
+```
+
+Ternyata mayoritas investor langsung memesan loan ketika membuka detailnya, yakni dibawah 5 menit untuk investor yang melihat detail loan 1 kali saja lalu pesan. Untuk yang membuka 2-4 kali waktunya berkisar 30 menitan. Pada jumlah_view 2 dan 3, karena ada outlier pesan lama sampai jauh dari median, ini membuat nilai rata-ratanya terpengaruh menjadi tinggi, 1 jam lebih.
+
+## Rata- rata waktu pemesanan sejak loan di-upload setiap minggu nya
+Pada tahap ini, yang dihitung adalah lama waktu order sejak loan itu pertama di-upload.
+Data ini akan dibuat dalam bentu plot mingguan untuk melihat bagaimana tren nya.
+
+Pertama buat dulu data.frame baru,
+
+dengan menggunakan data.frame **df_loan_invest**, filter hanya yang order (tidak kosong). Buat kolom tanggal yang merupakan pembualatan kebawah dari waktu upload ke marketplace dalam satuan **minggu**, dengan menggunakan fungsi **floor_date** terhadap kolom marketplace.
+
+lalu hitung lama_order sejak di-upload ke marketplace (dalam jam)
+
+lalu kelompokkan berdasarkan kolom tanggal yang baru saja dibuat untuk menghitung median dari kolom **lama_order**.
+
+Simpan hasilnya sebagai **df_lama_order_per_minggu**.
+
+Langsung dibuat plotnya menggunakan package **ggplot2** yang berisi tren line dari lama order per minggu, berikan label,
+title : "Rata-rata lama order pada tahun 2020 lebih lama daripada 2019"
+x : "Tanggal"
+y : "waktu di marketplace sampai di-pesan (jam)"
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+df_lama_order_per_minggu <- df_loan_invest %>% 
+  filter(!is.na(order)) %>%
+  mutate(tanggal = floor_date(marketplace, 'week'),
+         lama_order = as.numeric(difftime(order, marketplace, units='hour'))) %>% 
+  group_by(tanggal) %>%
+  summarise(lama_order = median(lama_order)) 
+
+ggplot(df_lama_order_per_minggu) +
+  geom_line(aes(x = tanggal, y = lama_order)) +
+  theme_bw() + 
+  labs(title = 'Rata-rata lama order pada tahun 2020 lebih lama daripada 2019', 
+	   x = 'Tanggal', 
+	   y = 'waktu di marketplace sampai di-pesan (jam)')
+```
+
+## Apakah Investor membayar pesanan yang dia buat.
+Pada tahap ini, yang ingin dilihat adalah berapa persen pesanan yang dibayar oleh investor.
+Data ini akan dibuat dalam bentuk plot mingguan untuk melihat bagaimana tren nya.
+
+Pertama buat dulu data.frame baru,
+dengan menggunakan data.frame **df_loan_invest**, filter hanya yang order (tidak kosong) Buat kolom tanggal yang merupakan pembualatan kebawah dari waktu upload ke marketplace dalam satuan **minggu**, dengan menggunakan fungsi **floor_date** terhadap kolom **marketplace**.
+Lalu kelompokkan berdasarkan kolom tanggal yang baru saja dibuat, hitung **persen_bayar** dengan cara menghitung berapa pesanan yang dibayar dari total yang dibayar. di R, karena FALSE berlnilai 0 dan TRUE itu satu, maka persentase tersebut bisa dihitung dengan cara menghitung rata-rata kondisi benar
+
+Jika **pay** ada isinya (dibayar) maka nilainya 1, kalau kosong nilainya 0. Rata-rata dari nilai ini sama dengan jumlah kondisi benar dibagi total kejadian.
+
+Simpan hasilnya sebagai **df_bayar_per_minggu**.
+
+Langsung dibuat plotnya menggunakan package **ggplot2** yang berisi tren line dari persen_bayar berdasarkan tanggal, berikan label,
+title : "Sekitar 95% membayar pesanannya. Di akhir mei ada outlier karena lebaran"
+x : "Tanggal"
+y : "Pesanan yang dibayar"
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+df_bayar_per_minggu <- df_loan_invest %>% 
+  filter(!is.na(order)) %>%
+  mutate(tanggal = floor_date(marketplace, 'week')) %>% 
+  group_by(tanggal) %>%
+  summarise(persen_bayar = mean(!is.na(pay))) 
+
+ggplot(df_bayar_per_minggu) +
+  geom_line(aes(x = tanggal, y = persen_bayar)) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() + 
+  labs(title = 'Sekitar 95% membayar pesanannya. Di akhir mei ada outlier karena lebaran', 
+	   x = 'Tanggal', 
+	   y = 'Pesanan yang dibayar')
+```
+
+## Waktu yang dibutuhkan investor untuk membayar pesanan
+Pada tahap ini, yang dihitung adalah lama waktu pembayaran sejak pesanan dibuat.
+Data ini akan dibuat dalam bentuk plot mingguan untuk melihat bagaimana tren nya.
+
+Pertama buat dulu data.frame baru,
+
+dengan menggunakan data.frame **df_loan_invest**, filter hanya yang pay (tidak kosong). Buat kolom tanggal yang merupakan pembualatan kebawah dari waktu upload ke order dalam satuan minggu, dengan menggunakan fungsi **floor_date** terhadap kolom **order**.
+
+Lalu hitung **lama_bayar** sejak di-upload ke order.
+
+Lalu kelompokkan berdasarkan kolom tanggal yang baru saja dibuat untuk menghitung median dari kolom **lama_bayar**.
+
+Simpan hasilnya sebagai **df_lama_bayar_per_minggu**.
+
+Langsung dibuat plotnya menggunakan package **ggplot2** yang berisi tren line dari lama pay per minggu, berikan label,
+title: "Waktu pembayaran trennya cenderung memburuk, 2x lebih lama dari sebelumnya"
+x : "Tanggal"
+y : "waktu di pesanan dibayar (jam)"
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+df_lama_bayar_per_minggu <- df_loan_invest %>% 
+  filter(!is.na(pay)) %>%
+  mutate(tanggal = floor_date(order, 'week'),
+         lama_bayar = as.numeric(difftime(pay, order, units = "hour"))) %>% 
+  group_by(tanggal) %>%
+  summarise(lama_bayar = median(lama_bayar)) 
+
+ggplot(df_lama_bayar_per_minggu) +
+  geom_line(aes(x = tanggal, y = lama_bayar)) +
+  theme_bw() + 
+  labs(title = 'Waktu pembayaran trennya cenderung memburuk, 2x lebih lama dari sebelumnya', 
+	   x = 'Tanggal', 
+	   y = 'waktu di pesanan dibayar (jam)')
+```
+
+## Kesimpulan
+Trend pada tahun 2020 cenderung lebih jelek daripada tahun 2019, hal ini mungkin karena adanya pandemi investor menjadi lebih lama untuk memprtimbangkan invest dimana, dan apakah pesanan yang sudah dibuat mau dibayar atau tidak
+
+# Chapter 6: Analisis Summary Investor
+
+## Trend Investor Register
+Di data.frame **df_event** ada 1 event yang belum diolah, yakni **‘investor_register’**, disini akan dibuat bagaimana tren jumlah investor yang register.
+
+dari df_event, filter nama_event investor_register, lalu hitung jumlah investor setiap minggunya. Simpan hasilnya sebagai **df_investor_register**.
+
+Langsung dibuat plotnya menggunakan package **ggplot2** yang berisi tren line dari persen_bayar berdasarkan tanggal, berikan label,
+title : "Investor register sempat naik di awal 2020 namun sudah turun lagi"
+x : "Tanggal"
+y : "Investor Register"
+
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+df_investor_register <- df_event %>% 
+  filter(nama_event == 'investor_register') %>%
+  mutate(tanggal = floor_date(created_at, 'week')) %>% 
+  group_by(tanggal) %>%
+  summarise(investor = n_distinct(investor_id)) 
+
+ggplot(df_investor_register) +
+  geom_line(aes(x = tanggal, y = investor)) +
+  theme_bw() + 
+  labs(title = 'Investor register sempat naik di awal 2020 namun sudah turun lagi', 
+	   x = 'Tanggal', 
+	   y = 'Investor Register')
+```
+
+## Trend Investor Investasi Pertama
+Setelah mendaftar, tujuan selanjutnya untuk investor adalah agar dia bisa invest. Hal ini biasa disebut conversion, yakni ketika user convert menjadi user yang kita harapkan, atau naik ke funnel yang lebih baik.
+
+Untuk mencari tahu kapan investor convert, perlu dicari kapan investor pertama kali invest dan dibuat tren nya.
+
+Dari data.frame **df_event** filter nama event **‘investor_pay_loan’**, cari tanggal pertama untuk masing - masing investor, simpan sebagai **pertama_invest**. Dari pertama_invest ini baru diproses seperti sebelum-sebelumnya untuk dhihitung jumlah investor pertama invest setiap minggunya.
+
+Simpan hasilnya sebagai **df_investor_pertama_invest**.
+
+Langsung dibuat plotnya menggunakan package **ggplot2** yang berisi tren line dari persen_bayar berdasarkan tanggal, berikan label,
+title : "Ada tren kenaikan jumlah investor invest, namun turun drastis mulai Maret 2020"
+x : "Tanggal"
+y : "Investor Pertama Invest"
+
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+df_investor_pertama_invest <- df_event %>% 
+  filter(nama_event == 'investor_pay_loan') %>%
+  group_by(investor_id) %>% 
+  summarise(pertama_invest = min(created_at)) %>% 
+  mutate(tanggal = floor_date(pertama_invest, 'week')) %>% 
+  group_by(tanggal) %>% 
+  summarise(investor = n_distinct(investor_id)) 
+
+ggplot(df_investor_pertama_invest) +
+  geom_line(aes(x = tanggal, y = investor)) +
+  theme_bw() + 
+  labs(title = 'Ada tren kenaikan jumlah Investor Invest, namun turun drastis mulai Maret 2020', 
+	   x = 'Tanggal', 
+	   y = 'Investor Pertama Invest')
+```
+
+## Cohort Pertama Invest berdasarkan Bulan Register
+Pada sebelumnya sudah dihitung bagaimana tren investor baru invest setiap minggunya. Selanjutnya akan dilihat conversion invest berdasarkan bulan register.
+
+Step pertama membuat tanggal register per investor, **df_register_per_investor**,
+Buat 2 kolom baru, **tanggal_register** yang merupakan rename dari created_at, dan **bulan_register** yang merupakan floor_date dari tanggal_register, terakhir pilih kolom investor_id, dan 2 kolom yang baru dibuat
+
+Step kedua adalah membuat tanggal investasi pertama per investor, simpan sebagai **df_pertama_invest_per_investor**
+Caranya seperti pada bagian sebelumnya, hanya saja ini berhenti ketika mendapatkan nilai **pertama_invest**.
+
+Step selanjutnya adalah menggabungkan kedua data.frame tersebut dan memproses nya.
+
+Untuk menggabungkan, gunakan **left_join** karena ada investor yang tidak invest. Lalu hitung **lama_invest** dalam bulan.
+
+difftime satuan terbesarnya minggu (weeks), tidak bisa untuk menghitung selish bulan, jadi hitung selisih hari lalu di-div (dibagi dan dibulatkan kebawah) 30.
+
+Lalu kelompokkan berdasarkan **bulan_register** dan **lama_invest** untuk menghitung **investor_per_bulan** yakni **distinct investor** per kategori itu. Untuk investor yang belum pernah invest, tetap masuk dalam perhitungan dengan lama_invest yang kosong.
+
+Lalu group by **bulan_register** untuk menghitung **total investor** dalam bulan register itu.
+
+Lalu **lama_invest** yang kosong dihilangkan untuk menghilangkan investor yang belum pernah invest. setelah itu dihitung lagi totalnya, karena yang belum invest sudah dihilangkan, jadi yang bersisa hanya yang sudah invest, sehingga hasilnya adalah total investor yang sudah invest.
+
+Hitung **persen_invest** dan **breakdown_persen_invest** untuk nanti ditampilkan dalam value cohort.
+
+Setelah itu hilangkan kolom **investor_per_bulan** karena tidak dipakai. kalau tidak dihilangkan akan membuat spread tidak sesuai.
+
+Terakhir spread datanya berdasarkan **lama_invest** sebagai key dan **breakdown_persen_invest** sebagai value dari masing-masing key.
+
+
+```{r warning=FALSE, message=FALSE}
+	library(dplyr)
+	library(lubridate)
+	library(tidyr)
+
+	df_register_per_investor <- df_event %>%
+	  filter(nama_event == 'investor_register') %>% 
+	  rename(tanggal_register = created_at) %>%  
+	  mutate(bulan_register = floor_date(tanggal_register, 'month'))  %>%  
+	  select(investor_id, tanggal_register, bulan_register) 
+
+	df_pertama_invest_per_investor <- df_event %>%
+	  filter(nama_event == 'investor_pay_loan') %>% 
+	  group_by(investor_id) %>% 
+	  summarise(pertama_invest = min(created_at)) 
+
+	df_register_per_investor %>% 
+	  left_join(df_pertama_invest_per_investor, by = 'investor_id') %>% 
+	  mutate(lama_invest = as.numeric(difftime(pertama_invest, tanggal_register, units="day")) %/% 30) %>%  
+	  group_by(bulan_register, lama_invest) %>% 
+	  summarise(investor_per_bulan = n_distinct(investor_id)) %>% 
+	  group_by(bulan_register) %>% 
+	  mutate(register = sum(investor_per_bulan)) %>% 
+	  filter(!is.na(lama_invest)) %>% 
+	  mutate(invest = sum(investor_per_bulan)) %>% 
+	  mutate(persen_invest = scales::percent(invest/register)) %>% 
+	  mutate(breakdown_persen_invest = scales::percent(investor_per_bulan/invest)) %>%  
+	  select(-investor_per_bulan) %>%  
+	  spread(lama_invest, breakdown_persen_invest) 
+```
+
+Terihat bahwa untuk total register paling banyak adalah di bulan Maret 2020, seperti pada chart sebelumnya, hanya saja dari sebanyak itu sampai saat ini belum ada 2% yang sudah invest, sangat jauh dibandingkan bulan sebelumnya, yang bisa mencapai 7% lebih. yang merupakan conversion rate paling tinggi.
+
+Pada umumnya, hanya 5% investor dari semua investor yang mendaftar akan convert. Dan ketike convert mayoritas mereka melakukannya di bulan pertama (kurang dari 30 hari) sejak registrasi.
+
+## Cohort Retention Invest
+Setelah cohort investasi pertama, selanjutnya yang dihitung adalah cohort retention. Yakni apakah investor kembali invest lagi di bulan bulan selanjutnya setelah investasi pertama.
+
+Step pertama membuat tanggal investasi per investor, **df_investasi_per_investor**, dari **df_event** filter event yang menggambarkan kejadian investasi, lalu 1 kolom baru, tanggal_invest yang merupakan rename dari created_at, lalu pilih kolom investor_id, dan kolom yang baru dibuat
+
+Step selanjutnya adalah menggabungkan data.frame **df_pertama_invest_per_investor** yang dibuat pada bagian sebelumnya, dengan data.frame yang baru saja dibuat. Untuk menggabungkan, bisa gunakan **left_join** maupun **inner_join** karena data investor pada keduanya adalah sama.
+
+Lalu hitung **jarak_invest** dalam bulan.
+
+lalu kelompokkan berdasarkan **bulan_pertama_invest** dan **jarak_invest** untuk menghitung **investor_per_bulan** yakni distinct **investor_id** per kategori itu.
+
+lalu group by **bulan_pertama_invest** saja untuk menghitung berapa total **investor** sebenarnya.
+
+Disini tidak ditotal seperti pada perhitungan sebelumnya, karena jumlah investor bisa berulang pada bulan yang berbeda, jadi kalau ditotal hasilnya jauh lebih besar dari seharusnya, jadi  gunakan fungsi **max** untuk mencari angka tertinggi pada cohort bulan_pertama_invest itu. ini ada di jarak_invest ke 0, karena semua investor yang invest tentu saja semuanya investasinya di bulan pertama invest.
+
+Hitung **breakdown_persen_invest** untuk sebagai value yang dilihat pada persebaran jarak invest dari investasi pertama.
+
+Setelah itu hilangkan kolom **investor_per_bulan** karena tidak dipakai, kalau tidak dihilangkan akan membuat spread tidak sesuai.
+
+Lalu spread datanya berdasarkan **jarak_invest** sebagai key dan **breakdown_persen_invest** sebagai value dari masing-masing key.
+
+Terakhir hilangkan kolom **0** karena hasilnya pasti 100% semua.
+
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(tidyr)
+
+df_investasi_per_investor <- df_event %>%
+  filter(nama_event == 'investor_pay_loan') %>%
+  rename(tanggal_invest = created_at) %>% 
+  select(investor_id, tanggal_invest)
+
+df_pertama_invest_per_investor %>% 
+  mutate(bulan_pertama_invest = floor_date(pertama_invest, 'month'))  %>% 
+  inner_join(df_investasi_per_investor, by = 'investor_id') %>%
+  mutate(jarak_invest = as.numeric(difftime(tanggal_invest, pertama_invest, units="day")) %/% 30) %>% 
+  group_by(bulan_pertama_invest, jarak_invest) %>%
+  summarise(investor_per_bulan = n_distinct(investor_id)) %>%
+  group_by(bulan_pertama_invest) %>%
+  mutate(investor = max(investor_per_bulan)) %>%
+  mutate(breakdown_persen_invest = scales::percent(investor_per_bulan/investor)) %>%
+  select(-investor_per_bulan) %>%
+  spread(jarak_invest, breakdown_persen_invest) %>% 
+  select(-`0`)
+```
+
+Terihat bahwa pada bulan febuari terdapat investor yang melakukan investasi pertama paling banyak dibandingkan bulan lainnya. Akan tetapi kelompok tersebut retention nya jelak dibandingkan yang lain. pada 1 bulan setelah investasi pertama, hanya 16% investor saja yang investasi lagi. Ini hanya setengah dari tren pada bulan bulan sebelumnya, dimana sekitar 30% investor akan invest lagi 1 bulan setelah investasi pertama.
+
+Cohort yang paling stabil adalah di bulan Agustus 2019. Di sekitar angka 20% setiap bulannya, walaupun pada bulan ketujuh persentasenya ikut turun juga.
+
+# Chapter 7: Penutup
+
+## Kesimpulan
+Berdasarkan semua analisis yang telah dilakukan, dapat disimpulkan bahwa :
+
+* Secara umum, DQLab Finance sebenarnya sedang dalam growth yang positif, fluktuatif naik turun terjadi karena perbedaan behaviour di tanggal tertentu, yang dipengaruhi oleh hal lain, misalnya gajian.
+* Pada bulan Maret, April sampai pertangah Mei terjadi banyak penurunan pada metriks yang dianalisis, hal ini mungkin karena adanya pandemi Covid19, perlu dianalisis lebih lanjut apakah memang karena itu.
+* Secara Umum, 5% dari total investor yang register setiap bulannya, akan melakukan investasi, dan mayoritas dilakukan pada 30 hari pertama setelah register, dan sebagian kecil di bulan kedua. Di bulan selanjutnya peluangnya sangat kecil untuk bisa convert. Sehingga perlu dipastikan bagaimana journey investor tersebut lancar di bulan pertama, sehingga mau convert invest di DQLab Finance.
+* Selenjutnya perlu dilihat juga setelah invest pertama itu invest lagi di bulan bulan selanjutnya. Secara umum 30% investor akan invest lagi pada bulan berikutnya.
+* Pada bulan Febuari, conversion rate nya bagus, paling tinggi yakni 7.57%, secara jumlah juga paling banyak, tapi ketika dilihat retentionnya, hanya 16% yang invest pada bulan selanjutnya, hanya setengahnya dari kategori bulan bulan lainnya.
+* Perlu dianalisis lebih lanjut darimana dan profil dari investor di bulan Febuari sampai April 2020.
+
